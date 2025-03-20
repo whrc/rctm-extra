@@ -23,11 +23,11 @@ def split(
         ..., "--config-path", "-c", help="Path to the configuration file"
     ),
     remote_batch_path: str = typer.Option(
-        ..., "--remote-batch-path", "-p", help="Blob path to store split data"
+        ..., "--remote-batch-path", "-p", help="Blob path to store split data without the bucket name"
     ),
     rctm_path: str = typer.Option(
         f"{os.getenv('HOME')}/RCTM", "--rctm-path", "-rctm", help="Path to the RCTM model"
-    )
+    ),
 ):
     args = type("Args", (), {
         "config_path": config_path,
@@ -39,8 +39,23 @@ def split(
 
 
 @app.command("run")
-def run():
-    args = type("Args", (), {})()
+def run(
+    bucket_name: str = typer.Option(
+        ..., "--bucket-name", "-b", help="Bucket name"
+    ),
+    remote_batch_path: str = typer.Option(
+        ..., "--remote-batch-path", "-p", help="Blob path to access the split data without the bucket name"
+    ),
+    local_batch_path: str = typer.Option(
+        ..., "--local-batch-path", "-l", help="Local path to store remote data"
+    ),
+):
+    args = type("Args", (), {
+        "bucket_name": bucket_name,
+        "remote_batch_path": remote_batch_path,
+        "local_batch_path": local_batch_path,
+        },
+    )()
     RunCommand(args).execute()
 
 
