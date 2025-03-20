@@ -24,3 +24,13 @@ def download_blob(storage_client, bucket_name, source_blob_name, destination_fil
     blob.download_to_filename(destination_file_name)
 
     return destination_file_name
+
+
+def list_blobs(storage_client, bucket_name, prefix):
+    blobs = storage_client.list_blobs(bucket_name, prefix=prefix)
+
+    files = []
+    for blob in blobs:
+        files.append(blob.name)
+
+    return files
