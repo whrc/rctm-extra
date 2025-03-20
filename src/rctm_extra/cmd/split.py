@@ -12,6 +12,9 @@ from string import Template
 
 from google.cloud import storage
 from rctm_extra.cmd.base import BaseCommand
+from rctm_extra.file import generate_hidden_folder
+from rctm_extra.gcp import get_storage_client, download_blob, upload_directory
+from rctm_extra.spatial import get_dimensions_netcdf
 
 
 X_STEP = 10
@@ -44,50 +47,8 @@ class Batch:
     config_path: str
     slurm_script_path: str
 
-
-class SplitCommand(BaseCommand):
-    def __init__(self, args):
-        super().__init__(args)
-
-    def _generate_hidden_folder(self, base_dir="."):
-        folder_name = "." + "".join(random.choices(ascii_letters + digits, k=10))
-        folder_path = os.path.join(base_dir, folder_name)
-
-        os.makedirs(folder_path, exist_ok=True)
-        return folder_path
-
     @staticmethod
-    def _download_blob(download_info):
-        """Download a blob from a bucket to a local file.
-        
-        Args:
-            download_info: A tuple of (bucket_name, source_blob_name, destination_file_name)
-        """
-        bucket_name, source_blob_name, destination_file_name = download_info
-        storage_client = storage.Client(project="rangelands-explo-1571664594580")
-        bucket = storage_client.bucket(bucket_name)
-        blob = bucket.blob(source_blob_name)
-        blob.download_to_filename(destination_file_name)
-
-        print(
-            "Downloaded storage object {} from bucket {} to local file {}.".format(
-                source_blob_name, bucket_name, destination_file_name
-            )
-        )
-        return destination_file_name
-
-    def _parallel_download_blobs(self, tasks: list):
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-            futures = [executor.submit(self._download_blob, task) for task in tasks]
-            concurrent.futures.wait(futures)
-
-            for future in futures:
-                try:
-                    future.result()
-                except Exception as e:
-                    print(f"Download failed with error: {e}")
-
-    def _create_batch_objects(self, x_dim: int, y_dim: int, local_base_dir: str) -> list:
+    def create_list(x_dim: int, y_dim: int, local_base_dir: str) -> list:
         batch_objs = []
         for x in range(0, x_dim, X_STEP):
             for y in range(0, y_dim, Y_STEP):
@@ -123,6 +84,11 @@ class SplitCommand(BaseCommand):
                 batch_objs.append(obj)
 
         return batch_objs
+
+
+class SplitCommand(BaseCommand):
+    def __init__(self, args):
+        super().__init__(args)
 
     def _split_input_files(self, batch_objs: list, path_to_input: str, path_to_spin_input: str, path_to_params: str) -> None:
         ds = xr.open_dataset(path_to_input)
@@ -213,30 +179,6 @@ class SplitCommand(BaseCommand):
             with open(obj.slurm_script_path, "w") as file:
                 file.write(text)
 
-    @staticmethod
-    def _upload_directory(args):
-        bucket_name, batch_obj, source_directory, destination_directory = args
-
-        storage_client = storage.Client()
-        bucket = storage_client.bucket(bucket_name)
-
-        local_batch_dir = Path(source_directory)
-        for local_file in local_batch_dir.rglob("*"):
-            if local_file.is_file():
-                relative_path = local_file.relative_to(batch_obj.local_base_directory)
-                blob_path = f"{destination_directory}/{relative_path}"
-                blob = bucket.blob(blob_path)
-                blob.upload_from_filename(str(local_file))
-
-
-    # upload_directory(bucket_name, obj.local_batch_path, base_batch_folder)
-    def _parallel_upload_directory(self, bucket_name, batch_objs, base_batch_folder, max_workers=4):
-        tasks = []
-        for obj in batch_objs:
-            tasks.append((bucket_name, obj, obj.local_batch_path, base_batch_folder))
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            executor.map(self._upload_directory, tasks)
-
     def execute(self):
         absolute_config_path = os.path.abspath(self.args.config_path)
         if not os.path.exists(absolute_config_path):
@@ -254,7 +196,7 @@ class SplitCommand(BaseCommand):
         bucket_name = config_data.get("bucket_name")
         site_path = config_data.get("gcloud_workflow_base_dir")
 
-        local_base_directory = self._generate_hidden_folder()
+        local_base_directory = generate_hidden_folder()
         print(f"created temp directory: {local_base_directory}")
         os.makedirs(local_base_directory, exist_ok=True)
 
@@ -262,24 +204,33 @@ class SplitCommand(BaseCommand):
         path_to_spin_input = os.path.join(local_base_directory, "RCTM_spin_inputs.nc")
         path_to_params = os.path.join(local_base_directory, "spatial_params.tif")
 
+        storage_client = get_storage_client()
         download_tasks = [
-            (bucket_name, f"{site_path}/RCTM_ins/RCTM_inputs.nc", path_to_input),
-            (bucket_name, f"{site_path}/RCTM_ins/RCTM_spin_inputs.nc", path_to_spin_input),
-            (bucket_name, f"{site_path}/params/spatial_params.tif", path_to_params)
+            (storage_client, bucket_name, f"{site_path}/RCTM_ins/RCTM_inputs.nc", path_to_input),
+            (storage_client, bucket_name, f"{site_path}/RCTM_ins/RCTM_spin_inputs.nc", path_to_spin_input),
+            (storage_client, bucket_name, f"{site_path}/params/spatial_params.tif", path_to_params)
         ]
 
         print("downloading the input data in parallel")
-        self._parallel_download_blobs(download_tasks)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            def starmap_helper(func, args_tuple):
+                return func(*args_tuple)
 
-        with xr.open_dataset(path_to_input) as ds:
-            X = ds.sizes["x"]
-            Y = ds.sizes["y"]
+            futures = [executor.submit(starmap_helper, download_blob, task) for task in download_tasks]
+            concurrent.futures.wait(futures)
 
+            for future in futures:
+                try:
+                    future.result()
+                except Exception as e:
+                    print(f"Download failed with error: {e}")
+
+        X, Y = get_dimensions_netcdf(path_to_input)
         cell_count = X * Y
         print(f"total cell count = {cell_count}")
 
         print("creating batch objects")
-        batch_objs = self._create_batch_objects(X, Y, local_base_directory)
+        batch_objs = Batch.create_list(X, Y, local_base_directory)
 
         print("splitting input files")
         self._split_input_files(batch_objs, path_to_input, path_to_spin_input, path_to_params)
@@ -289,8 +240,23 @@ class SplitCommand(BaseCommand):
         self._create_config_files(batch_objs, config_data, remote_batch_path, absolute_rctm_path)
         self._create_slurm_files(batch_objs)
 
+        upload_tasks = []
+        for obj in batch_objs:
+            upload_tasks.append((storage_client, bucket_name, obj.local_base_directory, obj.local_batch_path, remote_batch_path))
+
         print("uploading the split data to the bucket")
-        self._parallel_upload_directory(bucket_name, batch_objs[:5], remote_batch_path)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            def starmap_helper(func, args_tuple):
+                return func(*args_tuple)
+
+            futures = [executor.submit(starmap_helper, upload_directory, task) for task in upload_tasks]
+            concurrent.futures.wait(futures)
+
+            for future in futures:
+                try:
+                    future.result()
+                except Exception as e:
+                    print(f"Download failed with error: {e}")
 
         print("removing the temporary folder")
         shutil.rmtree(local_base_directory)
