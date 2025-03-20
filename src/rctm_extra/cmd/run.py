@@ -1,10 +1,7 @@
-import concurrent.futures
 import os
-import subprocess
+import sys
 
 from rctm_extra.cmd.base import BaseCommand
-from rctm_extra.gcp import get_storage_client, list_blobs, download_blob
-from rctm_extra.utils import get_batch_dirs
 
 
 class RunCommand(BaseCommand):
@@ -12,56 +9,19 @@ class RunCommand(BaseCommand):
         super().__init__(args)
 
     def execute(self):
-        bucket_name = self.args.bucket_name
-        prefix = self.args.remote_batch_path
-        work_directory = self.args.local_batch_path
+        home = os.getenv("HOME")
+        rctm_path = os.path.join(home, "RCTM")
 
-        os.makedirs(work_directory, exist_ok=True)
+        sys.path.insert(0, rctm_path)
+        os.environ["PYTHONPATH"] = ""
+        os.environ["RCTMPATH"] = os.path.join(rctm_path, "RCTM")
 
-        client = get_storage_client()
-        files = list_blobs(client, bucket_name, prefix)
-        batch_dirs = get_batch_dirs(files, prefix)
+        from RCTM.pipelines.RCTM_model_pipeline import RCTMPipeline
 
-        for batch_dir in batch_dirs:
-            full_path = os.path.join(work_directory, batch_dir)
-            os.makedirs(full_path, exist_ok=True)
+        config_path = self.args.config_path
+        if not os.path.exists(config_path) or not config_path.endswith(".yaml"):
+            print("The given path not found or not a config file. Aborting")
+            sys.exit(1)
 
-        config_files = []
-        slurm_files = []
-        for file in files:
-            if "config.yaml" in file:
-                config_files.append(file)
-
-            if "slurm_runner.sh" in file:
-                slurm_files.append(file)
-
-
-        file_pairs = list(zip(config_files, slurm_files))
-        download_tasks = []
-        for config_file, slurm_file in file_pairs:
-            config_raw_file = config_file.replace(f"{prefix}/", "")
-            config_dest = os.path.join(work_directory, config_raw_file)
-            download_tasks.append((bucket_name, config_file, config_dest))
-
-            slurm_raw_file = slurm_file.replace(f"{prefix}/", "")
-            slurm_dest = os.path.join(work_directory, slurm_raw_file)
-            download_tasks.append((bucket_name, slurm_file, slurm_dest))
-
-        print("Downloading blobs from the bucket. This may take a while...")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-            def starmap_helper(func, args_tuple):
-                return func(*args_tuple)
-
-            futures = [executor.submit(starmap_helper, download_blob, task) for task in download_tasks]
-            concurrent.futures.wait(futures)
-
-            for future in futures:
-                try:
-                    future.result()
-                except Exception as e:
-                    print(f"Download failed with error: {e}")
-
-        for batch_dir in batch_dirs:
-            path = os.path.join(work_directory, batch_dir, "slurm_runner.sh")
-            # subprocess.run(["sbatch", path])
-            print(f"sbatch {path}")
+        pipeline = RCTMPipeline(config_filename=config_path)
+        pipeline.run_RCTM()

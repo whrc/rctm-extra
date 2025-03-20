@@ -5,6 +5,7 @@ from rctm_extra.cmd.init import InitCommand
 from rctm_extra.cmd.split import SplitCommand
 from rctm_extra.cmd.run import RunCommand
 from rctm_extra.cmd.merge import MergeCommand
+from rctm_extra.cmd.submit import SubmitCommand
 
 
 app = typer.Typer(
@@ -38,8 +39,8 @@ def split(
     SplitCommand(args).execute()
 
 
-@app.command("run")
-def run(
+@app.command("submit")
+def submit(
     bucket_name: str = typer.Option(
         ..., "--bucket-name", "-b", help="Bucket name"
     ),
@@ -56,6 +57,18 @@ def run(
         "local_batch_path": local_batch_path,
         },
     )()
+    SubmitCommand(args).execute()
+
+
+@app.command("run")
+def run(
+    config_path: str = typer.Option(
+        ..., "--config-path", "-c", help="Path to the configuration file"
+    ),
+):
+    args = type("Args", (), {
+        "config_path": config_path,
+    })()
     RunCommand(args).execute()
 
 

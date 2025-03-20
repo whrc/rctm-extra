@@ -31,7 +31,9 @@ JOB_TEMPLATE = """
 source /data/venv/bin/activate
 pip install -r /opt/requirements.txt
 
-# run the model
+# install rctm_extra
+
+rctm_extra --config-path {config_path}
 """
 
 @dataclass
