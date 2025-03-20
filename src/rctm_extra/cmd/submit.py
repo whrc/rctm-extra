@@ -35,17 +35,16 @@ class SubmitCommand(BaseCommand):
             if "slurm_runner.sh" in file:
                 slurm_files.append(file)
 
-
         file_pairs = list(zip(config_files, slurm_files))
         download_tasks = []
         for config_file, slurm_file in file_pairs:
             config_raw_file = config_file.replace(f"{prefix}/", "")
             config_dest = os.path.join(work_directory, config_raw_file)
-            download_tasks.append((bucket_name, config_file, config_dest))
+            download_tasks.append((client, bucket_name, config_file, config_dest))
 
             slurm_raw_file = slurm_file.replace(f"{prefix}/", "")
             slurm_dest = os.path.join(work_directory, slurm_raw_file)
-            download_tasks.append((bucket_name, slurm_file, slurm_dest))
+            download_tasks.append((client, bucket_name, slurm_file, slurm_dest))
 
         print("Downloading blobs from the bucket. This may take a while...")
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:

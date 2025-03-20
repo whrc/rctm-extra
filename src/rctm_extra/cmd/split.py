@@ -1,5 +1,3 @@
-import random
-from string import ascii_letters, digits
 import os
 import yaml
 import xarray as xr
@@ -7,10 +5,8 @@ import shutil
 import rioxarray
 import concurrent.futures
 from dataclasses import dataclass
-from pathlib import Path
 from string import Template
 
-from google.cloud import storage
 from rctm_extra.cmd.base import BaseCommand
 from rctm_extra.file import generate_hidden_folder
 from rctm_extra.gcp import get_storage_client, download_blob, upload_directory
@@ -30,8 +26,6 @@ JOB_TEMPLATE = """
 
 source /data/venv/bin/activate
 pip install -r /opt/requirements.txt
-
-# install rctm_extra
 
 rctm_extra --config-path {config_path}
 """
@@ -173,7 +167,8 @@ class SplitCommand(BaseCommand):
         for obj in batch_objs:
             values = {
                 "job_name": obj.name,
-                "log_path": "CHANGE_ME",
+                "log_path": obj.name,
+                "config_path": obj.config_path,
             }
 
             template = Template(JOB_TEMPLATE)
