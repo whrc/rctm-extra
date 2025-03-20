@@ -1,3 +1,4 @@
+import os
 import typer
 
 from rctm_extra.cmd.init import InitCommand
@@ -17,8 +18,23 @@ def init():
 
 
 @app.command("split")
-def split():
-    args = type("Args", (), {})()
+def split(
+    config_path: str = typer.Option(
+        ..., "--config-path", "-c", help="Path to the configuration file"
+    ),
+    remote_batch_path: str = typer.Option(
+        ..., "--remote-batch-path", "-p", help="Blob path to store split data"
+    ),
+    rctm_path: str = typer.Option(
+        f"{os.getenv('HOME')}/RCTM", "--rctm-path", "-rctm", help="Path to the RCTM model"
+    )
+):
+    args = type("Args", (), {
+        "config_path": config_path,
+        "remote_batch_path": remote_batch_path,
+        "rctm_path": rctm_path,
+        },
+    )()
     SplitCommand(args).execute()
 
 
