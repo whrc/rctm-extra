@@ -40,27 +40,31 @@ class SubmitCommand(BaseCommand):
         for config_file, slurm_file in file_pairs:
             config_raw_file = config_file.replace(f"{prefix}/", "")
             config_dest = os.path.join(work_directory, config_raw_file)
-            download_tasks.append((client, bucket_name, config_file, config_dest))
+            if not os.path.exists(config_dest):
+                download_tasks.append((client, bucket_name, config_file, config_dest))
 
             slurm_raw_file = slurm_file.replace(f"{prefix}/", "")
             slurm_dest = os.path.join(work_directory, slurm_raw_file)
-            download_tasks.append((client, bucket_name, slurm_file, slurm_dest))
+            if not os.path.exists(slurm_dest):
+                download_tasks.append((client, bucket_name, slurm_file, slurm_dest))
 
-        print("Downloading blobs from the bucket. This may take a while...")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-            def starmap_helper(func, args_tuple):
-                return func(*args_tuple)
+        if download_tasks:
+            print("Downloading missing files from the bucket. This may take a while...")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                def starmap_helper(func, args_tuple):
+                    return func(*args_tuple)
 
-            futures = [executor.submit(starmap_helper, download_blob, task) for task in download_tasks]
-            concurrent.futures.wait(futures)
+                futures = [executor.submit(starmap_helper, download_blob, task) for task in download_tasks]
+                concurrent.futures.wait(futures)
 
-            for future in futures:
-                try:
-                    future.result()
-                except Exception as e:
-                    print(f"Download failed with error: {e}")
+                for future in futures:
+                    try:
+                        future.result()
+                    except Exception as e:
+                        print(f"Download failed with error: {e}")
+        else:
+            print("All files already exist locally. No downloads needed.")
 
         for batch_dir in batch_dirs:
             path = os.path.join(work_directory, batch_dir, "slurm_runner.sh")
-            # subprocess.run(["sbatch", path])
-            print(f"sbatch {path}")
+            subprocess.run(["sbatch", path])
